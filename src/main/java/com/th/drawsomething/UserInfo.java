@@ -3,11 +3,10 @@ package com.th.drawsomething;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
-
 @Data
 @AllArgsConstructor
-public class Room {
-    private String name;
+public class UserInfo {
     private int id;
-    private int playerNum;
+    private String name;
+    private String password;
 }

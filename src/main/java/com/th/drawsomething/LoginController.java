@@ -7,7 +7,6 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
-import org.springframework.web.bind.annotation.RestController;
 
 import javax.servlet.http.HttpServletResponse;
 import javax.servlet.http.HttpSession;
@@ -29,11 +28,12 @@ public class LoginController {
         catch (EmptyResultDataAccessException exception){
             return "用户名或密码错误";
         }
-        session.setAttribute("userid",id.intValue());
+        session.setAttribute("userId",id.intValue());
+        session.setAttribute("userName",name);
         return "success";
     }
 
-    @GetMapping("login")
+    @GetMapping({"/", "/login"})
     public String login(){
         return "forward:/login.html";
     }
