@@ -27,7 +27,7 @@ public class RegisterController {
         if(name == null || password == null)
             return "用户名或密码为空";
         try{
-            jdbcTemplate.queryForObject("SELECT * FROM USERS WHERE name = ?", (resultSet, i) -> new UserInfo(resultSet.getInt("id"),resultSet.getString("name"),resultSet.getString("password")), new Object[]{name});
+            jdbcTemplate.queryForObject("SELECT * FROM USERS WHERE name = ?", (resultSet, i) -> new UserInfo(resultSet.getInt("id"),resultSet.getString("name"),resultSet.getString("password")), name);
         }
         catch (EmptyResultDataAccessException exception){
             KeyHolder keyHolder = new GeneratedKeyHolder();

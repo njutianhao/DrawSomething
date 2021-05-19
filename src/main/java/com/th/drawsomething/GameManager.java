@@ -11,20 +11,20 @@ import java.util.concurrent.PriorityBlockingQueue;
 @Component
 @Data
 public class GameManager {
-    private ConcurrentHashMap<Integer,Game> games = new ConcurrentHashMap<>();
+    private ConcurrentHashMap<Long,Game> games = new ConcurrentHashMap<>();
 
-    private final int idPoolSizeBase = 100;
+    private final long idPoolSizeBase = 100;
 
-    private int idPoolSize = 0;
+    private long idPoolSize = 0;
 
-    private PriorityBlockingQueue<Integer> idPool = new PriorityBlockingQueue<>();
+    private PriorityBlockingQueue<Long> idPool = new PriorityBlockingQueue<>();
 
     private boolean enlargeIdPool(){
         if(idPoolSize+idPoolSizeBase < 0)
         {
             return false;
         }
-        for (int i = idPoolSize;i<idPoolSize+idPoolSizeBase;i++)
+        for (long i = idPoolSize;i<idPoolSize+idPoolSizeBase;i++)
         {
             idPool.offer(i);
         }
@@ -32,25 +32,25 @@ public class GameManager {
         return true;
     }
 
-    public int addGame(String name){
-        Integer i;
+    public Long addGame(String name){
+        Long i;
         i = idPool.poll();
         if(i == null)
         {
             if(enlargeIdPool())
                 i = idPool.poll();
             else
-                return -1;
+                return null;
         }
-        games.put(i,new Game(new Room(name,i,0)));
+        games.put(i,new Game(name,i));
         return i;
     }
 
     @PostConstruct
     public void init(){
-        for(int i = 0;i < idPoolSize;i++)
+        for(long i = 0;i < idPoolSize;i++)
             idPool.offer(i);
-        for(int i = 0;i < 100;i++){
+        for(long i = 0;i < 100;i++){
             addGame(String.valueOf(i));
         }
     }

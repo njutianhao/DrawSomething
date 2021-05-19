@@ -19,5 +19,13 @@ public class DataBaseInitializer {
                 "name varchar(40) not null," +
                 "password varchar(40) not null" +
                 ")");
+        jdbcTemplate.update("Create Table if not exists Problems(" +
+                "id int unsigned auto_increment primary key," +
+                "problem varchar(40) not null," +
+                "author varchar(40) not null," +
+                "hint1 varchar(100)," +
+                "hint2 varchar(100)," +
+                "hint3 varchar(100)" +
+                ")");
     }
 }

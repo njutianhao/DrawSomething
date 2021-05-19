@@ -23,12 +23,12 @@ public class LoginController {
     public String login(String name, String password, HttpServletResponse response, HttpSession session) throws IOException {
         Integer id;
         try{
-            id = jdbcTemplate.queryForObject("SELECT id FROM USERS WHERE name = ? AND password = ?",Integer.class,new Object[]{name,password});
+            id = jdbcTemplate.queryForObject("SELECT id FROM USERS WHERE name = ? AND password = ?",Integer.class, name,password);
         }
         catch (EmptyResultDataAccessException exception){
             return "用户名或密码错误";
         }
-        session.setAttribute("userId",id.intValue());
+        session.setAttribute("userId", id);
         session.setAttribute("userName",name);
         return "success";
     }
