@@ -32,30 +32,38 @@ public class GameHandler extends TextWebSocketHandler {
         return new TextMessage(objectMapper.writeValueAsString(new JsonMessage(command,content)));
     }
 
-    private void setOwner(Game game,WebSocketSession session,String name) throws IOException {
-        session.sendMessage(createMessage("BeOwner",null));
-        game.setOwner(name);
+    private void setOwner(Game game,WebSocketSession session) throws IOException {
+        game.setOwner(session);
+        synchronized (session) {
+            session.sendMessage(createMessage("BeOwner", null));
+        }
     }
 
     private void sendToAll(ConcurrentHashMap<WebSocketSession,Player> map,TextMessage message) throws IOException {
         for(Map.Entry<WebSocketSession,Player> entry:map.entrySet())
         {
-            entry.getKey().sendMessage(message);
+            synchronized (entry.getKey()) {
+                entry.getKey().sendMessage(message);
+            }
         }
+    }
+
+    private void endGame(Game game) throws IOException {
+        game.getScheduledThreadPoolExecutor().getQueue().clear();
+        TextMessage message = createMessage("EndGame", null);
+        sendToAll(game.getPlayers(),message);
+        sendToAll(game.getObservers(),message);
+        game.endGame();
+        return ;
     }
 
     private void gameSchedule(Game game) throws IOException {
         ConcurrentHashMap<WebSocketSession, Player> players = game.getPlayers();
         ScheduledThreadPoolExecutor scheduledThreadPoolExecutor = game.getScheduledThreadPoolExecutor();
-        scheduledThreadPoolExecutor.getQueue().clear();//TODO:check
+        scheduledThreadPoolExecutor.getQueue().clear();
         Map.Entry<WebSocketSession,Player> entry = game.beginNextTurn(jdbcTemplate);
         if(entry == null) {
-            for (Map.Entry<WebSocketSession, Player> entry1 : players.entrySet()) {
-                synchronized (entry1.getKey()) {
-                    entry1.getKey().sendMessage(createMessage("EndGame", null));
-                }
-            }
-            game.endGame();
+            endGame(game);
             return ;
         }
         WebSocketSession session = entry.getKey();
@@ -64,95 +72,129 @@ public class GameHandler extends TextWebSocketHandler {
             session.sendMessage(createMessage("DrawTurnBegin", game.getProblem()));
         }
         game.setPainter(session);
+        TextMessage message = createMessage("GuessTurnBegin", game.getProblem().length());
         for(Map.Entry<WebSocketSession,Player> entry1:players.entrySet()) {
-            Player player1 = entry1.getValue();
-            if(!player.equals(player1))
+            if(!entry1.getKey().equals(session))
             {
                 synchronized (entry1.getKey()) {
-                    entry1.getKey().sendMessage(createMessage("GuessTurnBegin", game.getProblem().length()));
+                    entry1.getKey().sendMessage(message);
                 }
             }
         }
+        sendToAll(game.getObservers(),message);
 
         List<String> hints = game.getHints();
         int i = 0;
         for(;i < hints.size();i++)
         {
             int finalI = i;
-            if(game.getHints().get(finalI) != "") {
+            if(!game.getHints().get(finalI).equals("")) {
                 scheduledThreadPoolExecutor.schedule(() -> {
+                    TextMessage message1 = null;
+                    try {
+                        message1 = createMessage("Hint", game.getHints().get(finalI));
+                    } catch (JsonProcessingException e) {
+                        e.printStackTrace();
+                    }
                     for (Map.Entry<WebSocketSession, Player> entry1 : players.entrySet()) {
                         Player player1 = entry1.getValue();
                         if (!player.equals(player1)) {
-                            try {
                                 synchronized(entry1.getKey()) {
-                                    entry1.getKey().sendMessage(createMessage("Hint", game.getHints().get(finalI)));
+                                    try {
+                                        entry1.getKey().sendMessage(message1);
+                                    } catch (IOException e) {
+                                        e.printStackTrace();
+                                    }
                                 }
-                            } catch (IOException e) {
-                                e.printStackTrace();
-                            }
                         }
                     }
-                }, 15L * i, TimeUnit.SECONDS);
+                    try {
+                        sendToAll(game.getObservers(),message1);
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }, 15L * (i+1), TimeUnit.SECONDS);
             }
         }
+
         scheduledThreadPoolExecutor.schedule(()->{
-            for(Map.Entry<WebSocketSession,Player> entry1:game.getPlayers().entrySet())
-            {
-                try {
-                    synchronized (entry1.getKey()) {
-                        entry1.getKey().sendMessage(createMessage("TurnEnd", game.getPlayers().size() - 1 - game.getAnsweredNum()));
-                    }
-                } catch (IOException e) {
-                    e.printStackTrace();
-                }
+            TextMessage message1 = null;
+            try {
+                message1 = createMessage("TurnEnd", game.getPlayers().size() - 1 - game.getAnsweredNum());
+            } catch (JsonProcessingException e) {
+                e.printStackTrace();
             }
-        },i * 15L,TimeUnit.SECONDS);
+            try {
+                sendToAll(game.getPlayers(),message1);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            try {
+                sendToAll(game.getObservers(),message1);
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        },(i+1) * 15L,TimeUnit.SECONDS);
+
         scheduledThreadPoolExecutor.schedule(() -> {
             try {
                 gameSchedule(game);
             } catch (IOException e) {
                 e.printStackTrace();
             }
-        }, i * 15L + 5, TimeUnit.SECONDS);
+        }, (i+1) * 15L + 5, TimeUnit.SECONDS);
     }
 
-    private void sendPlayers(Game game) throws IOException {
-
+    private List<PlayerInfo> getPlayerInfo(Game game){
         List<PlayerInfo> list = new ArrayList<>();
         int i = 0;
         for(Map.Entry<WebSocketSession,Player> entry:game.getPlayers().entrySet())
         {
             Player player = entry.getValue();
-            list.add(new PlayerInfo(i++,player.getName(),player.getScore()));
+            if(entry.getKey().equals(game.getPainter()))
+                list.add(new PlayerInfo(i++,player.getName(),player.getScore(),true));
+            else
+                list.add(new PlayerInfo(i++,player.getName(),player.getScore(),false));
         }
-        System.out.println("--");
-        TextMessage message = createMessage("UpdatePlayers",list.toArray());
-        for(Map.Entry<WebSocketSession,Player> entry:game.getPlayers().entrySet())
-        {
-            synchronized (entry.getKey()) {
-                entry.getKey().sendMessage(message);
-            }
-        }
+        return list;
+    }
+
+    private void sendPlayers(Game game) throws IOException {
+        TextMessage message = createMessage("UpdatePlayers",getPlayerInfo(game).toArray());
+        sendToAll(game.getPlayers(),message);
+        sendToAll(game.getObservers(),message);
     }
 
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         Long roomId = (Long) session.getAttributes().get("roomId");
         String userName = (String)session.getAttributes().get("userName");
-        if(roomId == null || userName == null)
+        Game game = gameManager.getGames().get(roomId);
+        if(roomId == null || userName == null || game == null ||game.getPlayers().keySet().contains(session) || game.getObservers().keySet().contains(session))
         {
             session.close();
             return ;
         }
-        Game game = gameManager.getGames().get(roomId);
-        game.addPlayer(userName,session);
-
-        if(game.getOwner() == null)
+        if(game.getPlayers().size() >= DrawsomethingApplication.maxPlayer)
         {
-            setOwner(game,session,userName);
+            game.addObserver(userName,session);
+            TextMessage message = createMessage("UpdatePlayers",getPlayerInfo(game).toArray());
+            synchronized (session){
+                session.sendMessage(createMessage("BeObserver",null));
+                session.sendMessage(message);
+            }
+            return;
         }
-
-        sendPlayers(game);
+        else {
+            synchronized (game) {
+                if (game.isBegin())
+                    game.setTmpPlayer(game.getTmpPlayer() + 1);
+                game.addPlayer(userName, session);
+                if (game.getOwner() == null) {
+                    setOwner(game, session);
+                }
+            }
+            sendPlayers(game);
+        }
     }
 
     public void handleMessage(WebSocketSession session, WebSocketMessage<?> message) throws Exception {
@@ -168,8 +210,25 @@ public class GameHandler extends TextWebSocketHandler {
         }
     }
 
+    private void judgeTurnEnd(Game game) throws IOException {
+        if (game.getAnsweredNum() == game.getPlayers().size() -game.getTmpPlayer() - 1) {
+            TextMessage message = createMessage("TurnEnd", null);
+            sendToAll(game.getPlayers(),message );
+            sendToAll(game.getObservers(),message);
+            ScheduledThreadPoolExecutor scheduledThreadPoolExecutor = game.getScheduledThreadPoolExecutor();
+            scheduledThreadPoolExecutor.getQueue().clear();
+            scheduledThreadPoolExecutor.schedule(() -> {
+                try {
+                    gameSchedule(game);
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }, 5, TimeUnit.SECONDS);
+        }
+    }
+
     protected void handleTextMessage(WebSocketSession session, TextMessage message) throws Exception {
-        System.out.println(message.getPayload());
+//        System.out.println(message.getPayload());
         String payload = message.getPayload();
         ObjectMapper objectMapper = new ObjectMapper();
         JsonMessage jsonMessage = objectMapper.readValue(payload,JsonMessage.class);
@@ -178,82 +237,101 @@ public class GameHandler extends TextWebSocketHandler {
         Game game = gameManager.getGames().get(roomId);
         switch (jsonMessage.getCommand()){
             case "StartGame":
-                if(!game.isBegin() && game.getOwner().equals(userName))
+                if(!game.isBegin() && game.getOwner().equals(session) && game.getPlayers().size() >= 2)
                 {
                     game.startGame();
                     gameSchedule(game);
                 }
                 break;
             case "Guess":
-                if(game.isBegin() && session != game.getPainter()) {
+                if(game.isBegin() && !session.equals(game.getPainter()) && game.getPlayers().keySet().contains(session)) {
                     if (game.getProblem().equals(jsonMessage.getContent())) {
                         Player player = game.getPlayers().get(session);
-                        if (!player.isHasAnswered()) {
-                            if (game.getAnsweredNum() == 0) {
-                                game.setAnsweredNum(1);
-                                player.setScore(player.getScore() + 2);
-                            } else {
-                                player.setScore(player.getScore() + 1);
-                                game.setAnsweredNum(game.getAnsweredNum() + 1);
-                            }
-                            synchronized (session) {
-                                session.sendMessage(createMessage("AnswerRight", null));
-                            }
-                            sendPlayers(game);
-                            if (game.getAnsweredNum() == game.getPlayers().size() - 1) {
-                                sendToAll(game.getPlayers(), createMessage("TurnEnd", null));
-                                ScheduledThreadPoolExecutor scheduledThreadPoolExecutor = game.getScheduledThreadPoolExecutor();
-                                scheduledThreadPoolExecutor.getQueue().clear(); //TODO:CHECK
-                                scheduledThreadPoolExecutor.schedule(() -> {
-                                    try {
-                                        gameSchedule(game);
-                                    } catch (IOException e) {
-                                        e.printStackTrace();
-                                    }
-                                }, 5, TimeUnit.SECONDS);
+                        synchronized (player) {
+                            if (!player.isHasAnswered()) {
+                                if (game.getAnsweredNum() == 0) {
+                                    game.setAnsweredNum(1);
+                                    player.setScore(player.getScore() + 2);
+                                } else {
+                                    player.setScore(player.getScore() + 1);
+                                    game.setAnsweredNum(game.getAnsweredNum() + 1);
+                                }
+                                synchronized (session) {
+                                    session.sendMessage(createMessage("AnswerRight", null));
+                                }
+                                TextMessage message1 = createMessage("Guess", session.getAttributes().get("userName").toString() + "答对了");
+                                sendToAll(game.getPlayers(), message1);
+                                sendToAll(game.getObservers(), message1);
+                                sendPlayers(game);
+                                judgeTurnEnd(game);
                             }
                         }
                     }
-                    else
-                        sendToAll(game.getPlayers(),createMessage("Guess",session.getAttributes().get("userName").toString()+":"+jsonMessage.getContent()));
+                    else {
+                        TextMessage message1 = createMessage("Guess", session.getAttributes().get("userName").toString() + ":" + jsonMessage.getContent());
+                        sendToAll(game.getPlayers(),message1);
+                        sendToAll(game.getObservers(),message1);
+                    }
                 }
                 break;
             case "Talk":
-                sendToAll(game.getPlayers(),createMessage("Talk",session.getAttributes().get("userName").toString()+":"+jsonMessage.getContent()));
+                TextMessage message1 = createMessage("Talk", session.getAttributes().get("userName").toString() + ":" + jsonMessage.getContent());
+                sendToAll(game.getPlayers(),message1);
+                sendToAll(game.getObservers(),message1);
                 break;
             case "Draw":
-                if(game.isBegin() && session == game.getPainter())
+                if(game.isBegin() && session.equals(game.getPainter()))
                 {
-                    sendToAll(game.getPlayers(),createMessage("Draw",jsonMessage.getContent()));
+                    TextMessage message2 = createMessage("Draw", jsonMessage.getContent());
+                    sendToAll(game.getPlayers(),message2);
+                    sendToAll(game.getObservers(),message2);
                 }
                 break;
         }
     }
 
     public void afterConnectionClosed(WebSocketSession session, CloseStatus status) throws Exception {
-        System.out.println("Connection Closed");
         Long roomId = (Long)session.getAttributes().get("roomId");
         String userName = (String)session.getAttributes().get("userName");
-        if(roomId == null || userName == null)
-        {
+        if(roomId == null || userName == null) {
             System.out.println("null property");
-            return ;
+            return;
         }
         Game game = gameManager.getGames().get(roomId);
-        game.removePlayer(session);
-        if(game.getOwner().equals(userName))
-        {
-            ConcurrentHashMap<WebSocketSession,Player> players = game.getPlayers();
-            if(players.size() == 0)
-            {
-                gameManager.getGames().remove(roomId);
-            }
-            else
-            {
-                Iterator<Map.Entry<WebSocketSession, Player>> iterator = players.entrySet().iterator();
-                Map.Entry<WebSocketSession,Player> entry = iterator.next();
-                setOwner(game,entry.getKey(),entry.getValue().getName());
-            }
+        synchronized (game) {
+            if (game.getPlayers().keySet().contains(session)) {
+                game.removePlayer(session);
+                Iterator<Map.Entry<WebSocketSession, Player>> entryIterator = game.getObservers().entrySet().iterator();
+                if (entryIterator.hasNext()) {
+                    Map.Entry<WebSocketSession, Player> entry = entryIterator.next();
+                    game.addPlayer(entry.getValue().getName(), entry.getKey());
+                    synchronized (entry.getKey()) {
+                        entry.getKey().sendMessage(createMessage("BePlayer", null));
+                    }
+                    entryIterator.remove();
+                }
+                sendPlayers(game);
+                if (game.getPlayers().size() == 0) {
+                    gameManager.getGames().remove(roomId);
+                    gameManager.getIdPool().offer(roomId);
+                    return;
+                }
+                if (game.isBegin()) {
+                    if (game.getPlayers().size() == 1)
+                        endGame(game);
+                    else if (game.getPainter().equals(userName)) {
+                        gameSchedule(game);
+                    } else
+                        judgeTurnEnd(game);
+                }
+                if (game.getOwner().equals(session)) {
+                    ConcurrentHashMap<WebSocketSession, Player> players = game.getPlayers();
+                    Iterator<Map.Entry<WebSocketSession, Player>> iterator = players.entrySet().iterator();
+                    Map.Entry<WebSocketSession, Player> entry = iterator.next();
+                    setOwner(game, entry.getKey());
+                }
+            } else
+                game.removeObserver(session);
         }
     }
 }
@@ -264,6 +342,7 @@ class PlayerInfo{
     private int seat;
     private String name;
     private int score;
+    private boolean drawing;
 }
 
 @AllArgsConstructor

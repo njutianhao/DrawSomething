@@ -11,13 +11,13 @@ import java.util.concurrent.PriorityBlockingQueue;
 @Component
 @Data
 public class GameManager {
-    private ConcurrentHashMap<Long,Game> games = new ConcurrentHashMap<>();
+    private volatile ConcurrentHashMap<Long,Game> games = new ConcurrentHashMap<>();
 
     private final long idPoolSizeBase = 100;
 
-    private long idPoolSize = 0;
+    private volatile long idPoolSize = 0;
 
-    private PriorityBlockingQueue<Long> idPool = new PriorityBlockingQueue<>();
+    private volatile PriorityBlockingQueue<Long> idPool = new PriorityBlockingQueue<>();
 
     private boolean enlargeIdPool(){
         if(idPoolSize+idPoolSizeBase < 0)
@@ -50,8 +50,8 @@ public class GameManager {
     public void init(){
         for(long i = 0;i < idPoolSize;i++)
             idPool.offer(i);
-        for(long i = 0;i < 100;i++){
-            addGame(String.valueOf(i));
-        }
+//        for(long i = 0;i < 100;i++){
+//            addGame(String.valueOf(i));
+//        }
     }
 }

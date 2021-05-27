@@ -33,7 +33,7 @@ public class LoginController {
         return "success";
     }
 
-    @GetMapping({"/", "/login"})
+    @GetMapping("/login")
     public String login(){
         return "forward:/login.html";
     }

@@ -10,26 +10,27 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 
 @Data
 public class Game {
-    private String roomName;
-    private long roomId;
-    private boolean begin = false;
-    private int round = 0;
-    private final int maxRound = 3;
+    private volatile String roomName;
+    private volatile long roomId;
+    private volatile boolean begin = false;
+    private volatile int round = 0;
+    private final int maxRound = 2;
+    private volatile int tmpPlayer = 0;
 
-    private WebSocketSession painter;
-    private ConcurrentHashMap<WebSocketSession,Player> players = new ConcurrentHashMap<>();
-    private ConcurrentHashMap<WebSocketSession,Player> observers = new ConcurrentHashMap<>();
+    private volatile WebSocketSession painter;
+    private volatile ConcurrentHashMap<WebSocketSession,Player> players = new ConcurrentHashMap<>();
+    private volatile ConcurrentHashMap<WebSocketSession,Player> observers = new ConcurrentHashMap<>();
 
-    private ConcurrentHashMap<WebSocketSession,Player> waiting = new ConcurrentHashMap<>();
+    private volatile ConcurrentHashMap<WebSocketSession,Player> waiting = new ConcurrentHashMap<>();
 
-    private String owner = null;
+    private volatile WebSocketSession owner = null;
 
-    private int answeredNum;
+    private volatile int answeredNum;
 
-    private String problem;
-    private List<String> hints = Arrays.asList(new String[]{"", "", ""});
+    private volatile String problem;
+    private volatile List<String> hints = Arrays.asList(new String[]{"", "", ""});
 
-    private ScheduledThreadPoolExecutor scheduledThreadPoolExecutor = new ScheduledThreadPoolExecutor(8);
+    private volatile ScheduledThreadPoolExecutor scheduledThreadPoolExecutor = new ScheduledThreadPoolExecutor(8);
 
 
 
@@ -38,7 +39,7 @@ public class Game {
         this.roomId = roomId;
     }
 
-    public void startGame(){
+    public synchronized void startGame(){
         if(!begin && players.size() > 0)
         {
             begin = true;
@@ -48,29 +49,41 @@ public class Game {
         }
     }
 
-    public void endGame(){
-        if(begin)
+    public synchronized void endGame(){
+        if(begin) {
             begin = false;
+            for(Map.Entry<WebSocketSession,Player> entry:players.entrySet())
+                entry.getValue().setScore(0);
+        }
     }
 
-    private Map.Entry<WebSocketSession,Player> pollWaiting(){
+    private synchronized Map.Entry<WebSocketSession,Player> pollWaiting(){
         Iterator<Map.Entry<WebSocketSession, Player>> iterator = waiting.entrySet().iterator();
         Map.Entry<WebSocketSession,Player> res = iterator.next();
         iterator.remove();
         return res;
     }
 
-    public void addPlayer(String name, WebSocketSession session){
+    public synchronized void addPlayer(String name, WebSocketSession session){
         if(players.size() >= DrawsomethingApplication.maxPlayer)
             return ;
         players.put(session,new Player(name));
     }
 
-    public void removePlayer(WebSocketSession session){
+    public synchronized void removePlayer(WebSocketSession session){
         players.remove(session);
+        waiting.remove(session);
     }
 
-    public boolean beginNextRound(){
+    public synchronized void addObserver(String name, WebSocketSession session){
+        observers.put(session,new Player(name));
+    }
+
+    public synchronized void removeObserver(WebSocketSession session){
+        observers.remove(session);
+    }
+
+    public synchronized boolean beginNextRound(){
         if(round == DrawsomethingApplication.maxRound)
             return false;
         round++;
@@ -78,7 +91,8 @@ public class Game {
         return true;
     }
 
-    public Map.Entry<WebSocketSession,Player> beginNextTurn(JdbcTemplate jdbcTemplate){
+    public synchronized Map.Entry<WebSocketSession,Player> beginNextTurn(JdbcTemplate jdbcTemplate){
+        tmpPlayer = 0;
         if(waiting.isEmpty())
         {
             if(!beginNextRound())
@@ -93,7 +107,7 @@ public class Game {
         return pollWaiting();
     }
 
-    private void prepareProblem(JdbcTemplate jdbcTemplate){
+    private synchronized void prepareProblem(JdbcTemplate jdbcTemplate){
         jdbcTemplate.queryForObject("SELECT * FROM Problems WHERE\n" +
                         "id + 1>= (SELECT MIN(id) from problems) + \n" +
                         "(1 + (SELECT Max(id) from problems) - \n" +
