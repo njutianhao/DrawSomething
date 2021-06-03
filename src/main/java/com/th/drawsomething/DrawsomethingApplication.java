@@ -8,7 +8,7 @@ public class DrawsomethingApplication {
 
 	public static final int maxPlayer = 8;
 
-	public static final int maxRound = 2;
+	public static final int maxRound = 1;
 
 	public static void main(String[] args) {
 		SpringApplication.run(DrawsomethingApplication.class, args);

@@ -120,7 +120,7 @@ public class GameHandler extends TextWebSocketHandler {
         scheduledThreadPoolExecutor.schedule(()->{
             TextMessage message1 = null;
             try {
-                message1 = createMessage("TurnEnd", game.getPlayers().size() - 1 - game.getAnsweredNum());
+                message1 = createMessage("TurnEnd", game.getPlayers().size() - 1 - game.getAnsweredNum().get());
             } catch (JsonProcessingException e) {
                 e.printStackTrace();
             }
@@ -152,9 +152,9 @@ public class GameHandler extends TextWebSocketHandler {
         {
             Player player = entry.getValue();
             if(entry.getKey().equals(game.getPainter()))
-                list.add(new PlayerInfo(i++,player.getName(),player.getScore(),true));
+                list.add(new PlayerInfo(i++,player.getName(),player.getScore().get(),true));
             else
-                list.add(new PlayerInfo(i++,player.getName(),player.getScore(),false));
+                list.add(new PlayerInfo(i++,player.getName(),player.getScore().get(),false));
         }
         return list;
     }
@@ -187,7 +187,7 @@ public class GameHandler extends TextWebSocketHandler {
         else {
             synchronized (game) {
                 if (game.isBegin())
-                    game.setTmpPlayer(game.getTmpPlayer() + 1);
+                    game.getTmpPlayer().addAndGet(1);
                 game.addPlayer(userName, session);
                 if (game.getOwner() == null) {
                     setOwner(game, session);
@@ -211,7 +211,7 @@ public class GameHandler extends TextWebSocketHandler {
     }
 
     private void judgeTurnEnd(Game game) throws IOException {
-        if (game.getAnsweredNum() == game.getPlayers().size() -game.getTmpPlayer() - 1) {
+        if (game.getAnsweredNum().get()== game.getPlayers().size() -game.getTmpPlayer().get() - 1) {
             TextMessage message = createMessage("TurnEnd", null);
             sendToAll(game.getPlayers(),message );
             sendToAll(game.getObservers(),message);
@@ -233,7 +233,6 @@ public class GameHandler extends TextWebSocketHandler {
         ObjectMapper objectMapper = new ObjectMapper();
         JsonMessage jsonMessage = objectMapper.readValue(payload,JsonMessage.class);
         Long roomId = (Long)session.getAttributes().get("roomId");
-        String userName = (String)session.getAttributes().get("userName");
         Game game = gameManager.getGames().get(roomId);
         switch (jsonMessage.getCommand()){
             case "StartGame":
@@ -247,14 +246,16 @@ public class GameHandler extends TextWebSocketHandler {
                 if(game.isBegin() && !session.equals(game.getPainter()) && game.getPlayers().keySet().contains(session)) {
                     if (game.getProblem().equals(jsonMessage.getContent())) {
                         Player player = game.getPlayers().get(session);
+                        Player painter = game.getPlayers().get(game.getPainter());
                         synchronized (player) {
                             if (!player.isHasAnswered()) {
-                                if (game.getAnsweredNum() == 0) {
-                                    game.setAnsweredNum(1);
-                                    player.setScore(player.getScore() + 2);
+                                game.getPlayers().get(game.getPainter()).getScore().addAndGet(1);
+                                if (game.getAnsweredNum().get() == 0) {
+                                    game.getAnsweredNum().set(1);
+                                    player.getScore().addAndGet(2);
                                 } else {
-                                    player.setScore(player.getScore() + 1);
-                                    game.setAnsweredNum(game.getAnsweredNum() + 1);
+                                    player.getScore().addAndGet(1);
+                                    game.getAnsweredNum().getAndAdd(1);
                                 }
                                 synchronized (session) {
                                     session.sendMessage(createMessage("AnswerRight", null));
@@ -319,7 +320,7 @@ public class GameHandler extends TextWebSocketHandler {
                 if (game.isBegin()) {
                     if (game.getPlayers().size() == 1)
                         endGame(game);
-                    else if (game.getPainter().equals(userName)) {
+                    else if (game.getPainter().equals(session)) {
                         gameSchedule(game);
                     } else
                         judgeTurnEnd(game);

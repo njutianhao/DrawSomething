@@ -19,7 +19,7 @@ public class GameManager {
 
     private volatile PriorityBlockingQueue<Long> idPool = new PriorityBlockingQueue<>();
 
-    private boolean enlargeIdPool(){
+    private synchronized boolean enlargeIdPool(){
         if(idPoolSize+idPoolSizeBase < 0)
         {
             return false;
@@ -32,7 +32,7 @@ public class GameManager {
         return true;
     }
 
-    public Long addGame(String name){
+    public synchronized Long addGame(String name){
         Long i;
         i = idPool.poll();
         if(i == null)

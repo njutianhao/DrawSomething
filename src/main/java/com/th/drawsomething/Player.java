@@ -3,18 +3,20 @@ package com.th.drawsomething;
 import lombok.Data;
 import org.springframework.web.socket.WebSocketSession;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 @Data
 public class Player {
     private String name;
-    private int score;
+    private AtomicInteger score = new AtomicInteger();
     private boolean hasAnswered;
     public Player(String name){
         this.name = name;
-        score = 0;
+        score.set(0);
     }
 
     public void init(){
-        score = 0;
+        score.set(0);
         hasAnswered = false;
     }
 
